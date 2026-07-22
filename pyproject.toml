@@ -1,0 +1,29 @@
+[project]
+name = "detr"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torchvision",
+    "scipy",
+    "pycocotools",
+    "matplotlib",
+    "numpy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pyright"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pyright]
+include = ["src", "tests"]
+typeCheckingMode = "standard"
+venvPath = "."
+venv = ".venv"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
