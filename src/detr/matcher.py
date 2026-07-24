@@ -45,26 +45,48 @@ class HungarianMatcher(nn.Module):
         pred_logits = output.pred_logits
         pred_boxes = output.pred_boxes
 
+        # Flatten predictions across the batch
         B, N = pred_logits.shape[:2]
+        # (B * N, C + 1) -> softmaxed
         out_prob = pred_logits.flatten(0, 1).softmax(-1)
+        # (B * N, 4)
         out_box = pred_boxes.flatten(0, 1)
 
+        # Concatenate all ground-truths
+        # (G, )
         target_ids = torch.cat([t["labels"] for t in targets])
+        # (G, 4)
         target_boxes = torch.cat([t["boxes"] for t in targets])
 
+        # Takes only the out_prob values corresponding to ground truth labels
+        # (B * N, G)
         cost_class = -out_prob[:, target_ids]
+
+        # Compute pairwise L1 distance between ground-truth and predicted
+        # (B * N, G)
         cost_box = torch.cdist(out_box, target_boxes, p=1)
+
+        # Compute pairwise GIoU loss
+        # (B * N, G)
         cost_giou = -generalized_box_iou(
             box_cxcywh_to_xyxy(out_box), box_cxcywh_to_xyxy(target_boxes)
         )
 
+        # Compute weighted sum for total cost
         cost_total = (self.cost_bbox * cost_box + self.cost_class * cost_class + self.cost_giou * cost_giou)
+        # Unflatten (B * N, G) to (B, N, G), then run on cpu because of SciPy
         cost_total = cost_total.view(B, N, -1).cpu()
 
+        # Count number of boxes per target image
         sizes = [len(t["boxes"]) for t in targets]
         indices = []
 
+        # Iterate though chunks of costs; each chunk corresponds to one image
+        # (B, N, G) -> B items of (B, N, n_i)
         for i, c in enumerate(cost_total.split(sizes, dim=2)):
+            # Given (N, n_i) cost matrix, compute the minimum-total-cost
+            # assignment of the n_i gts to n_i distinct predictions
+            # c[i] is (N, n_i)
             row, col = linear_sum_assignment(c[i])
             indices.append((
                 torch.as_tensor(row, dtype=torch.long),

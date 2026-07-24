@@ -109,23 +109,29 @@ class DETR(nn.Module):
     def forward(self, x: Tensor) -> DETROutputWithAuxOutputs:
         """``(B, 3, H, W)`` image batch -> predictions with auxiliary outputs."""
         features: Tensor = self.backbone(x)
-        B, C, h, w = features.shape
+
+        B, _, h, w = features.shape
         mask = torch.zeros(B, h, w, dtype=torch.bool, device=x.device)
         pos = self.pos_emb(mask)
 
+        # (B, d_model, h, w) -> (B, d_model, h * w) -> (h * w, B, d_model)
         src = features.flatten(2).permute(2, 0, 1)
         pos = pos.flatten(2).permute(2, 0, 1)
 
+        # (num_decoder_layers, N, B, D) -> (num_decoder_layers, B, N, D)
         hs: Tensor = self.transformer(src, pos, self.query_emb.weight)
         hs = hs.transpose(1, 2)
 
+        # (num_decoder_layers, B, N, D) -> (num_decoder_layers, B, N, num_classes + 1)
         outputs_class: Tensor = self.class_head(hs)
+        # (num_decoder_layers, B, N, D) -> (num_decoder_layers, B, N, 4)
         outputs_coord: Tensor = self.box_head(hs).sigmoid()
 
+        # Return last layer bc it is derived from last decoder layer (most-refined)
         return DETROutputWithAuxOutputs(
             output=DETROutput(
-                pred_logits=outputs_class[-1],
-                pred_boxes=outputs_coord[-1]
+                pred_logits=outputs_class[-1],  # (B, N, num_classes + 1)
+                pred_boxes=outputs_coord[-1],  # (B, N, 4)
             ),
             aux_outputs=[
                 DETROutput(pred_logits=c, pred_boxes=b)

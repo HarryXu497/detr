@@ -28,14 +28,17 @@ class MultiHeadAttention(nn.Module):
 
     def __init__(self, d_model: int, nheads: int, dropout: float = 0.0):
         super().__init__()
+        self._dropout = nn.Dropout(dropout)
+        self._nheads = nheads
+        self._head_dim, remainder = divmod(d_model, nheads)
+
+        if remainder != 0:
+            raise ValueError("'d_model' must be divisible by 'nheads'.")
+
         self.q_proj = nn.Linear(d_model, d_model)
         self.k_proj = nn.Linear(d_model, d_model)
         self.v_proj = nn.Linear(d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
-
-        self._dropout = nn.Dropout(dropout)
-        self._nheads = nheads
-        self._head_dim = d_model // nheads
 
     def forward(
             self,
@@ -59,31 +62,45 @@ class MultiHeadAttention(nn.Module):
         Returns:
             ``(Lq, B, D)`` output, one vector per query position.
         """
-        # Add positions to the query and key
+        # Add position encoding to the query and key
         q: Tensor = self.q_proj(query + query_pos if query_pos is not None else query)
         k: Tensor = self.k_proj(key + key_pos if key_pos is not None else key)
         v: Tensor = self.v_proj(value)
 
-        # Split the feature dim into heads
+        # Split the FEATURE dim into heads i.e. split each query vector into heads
+        # Replace the 'D' dimension with (self._nheads, self._head_dim)
+        # Then each head attends to sections of EVERY query vector
         Lq, B, D = query.shape
         Lk = key.shape[0]
+        # (Lq/Lk, B, nheads, head_dim) -> (B, nheads, Lq/Lk, head_dim)
         q = q.view(Lq, B, self._nheads, self._head_dim).permute(1, 2, 0, 3)
         k = k.view(Lk, B, self._nheads, self._head_dim).permute(1, 2, 0, 3)
         v = v.view(Lk, B, self._nheads, self._head_dim).permute(1, 2, 0, 3)
 
         # Scaled dot-product scores
+        # (B, nheads, Lq, head_dim) @ (B, nheads, Lk, head_dim).transpose(-2, -1)
+        # (B, nheads, Lq, head_dim) @ (B, nheads, head_dim, Lk)
+        # B and nheads are the batch; Matmul has (Lq, head_dim) @ (head_dim, Lk) -> (Lq, Lk)
+        # Result: (B, nheads, Lq, Lk)
         scores: Tensor = q @ k.transpose(-2, -1) / (self._head_dim ** 0.5)
 
         # Set excluded keys to -inf so their softmax weight is zero.
         if key_padding_mask is not None:
+            # (B, 1, 1, Lk) is broadcast to (B, nheads, Lq, Lk)
+            # Masks out certain values vectors per batch by setting the corresponding score to -inf
             mask = key_padding_mask[:, None, None, :]
             scores = scores.masked_fill(mask, float("-inf"))
 
+        # Softmax and dropout (B, nheads, Lq, Lk)
+        # Softmax rescales along Lk dimension
         weights = scores.softmax(dim=-1)
         weights = self._dropout(weights)
 
+        # Weighted sum of value vectors from attention scores
+        # (B, nheads, Lq, Lk) @ (B, nheads, Lk, head_dim) = (B, nheads, Lq, head_dim)
         out: Tensor = weights @ v
 
+        # (B, nheads, Lq, head_dim) -> (Lq, B, nheads, head_dim) -> (Lq, B, D)
         out = out.permute(2, 0, 1, 3).reshape(Lq, B, D)
 
         return self.out_proj(out)

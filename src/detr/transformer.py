@@ -50,9 +50,11 @@ class TransformerEncoderLayer(nn.Module):
         Returns:
             ``(L, B, D)`` output sequence.
         """
+        # Self attention with key = value = query = src
         attention_out = self.self_attn(src, src, src, pos, pos, src_key_padding_mask)
         src = self.norm1(src + self.dropout1(attention_out))
 
+        # FFN for non-linearity
         ffn_out = self.linear2(self.dropout(self.activation(self.linear1(src))))
         src = self.norm2(src + self.dropout2(ffn_out))
         return src
@@ -101,12 +103,15 @@ class TransformerDecoderLayer(nn.Module):
         Returns:
             ``(N, B, D)`` refined content.
         """
+        # Self attention with key = value = query = target
         self_attn_out = self.self_attn(target, target, target, query_pos, query_pos)
         target = self.norm1(target + self.dropout1(self_attn_out))
 
+        # Cross attention with key and value as memory/context (should be from the encoder)
         cross_attn_out = self.cross_attn(target, memory, memory, query_pos, pos, memory_key_padding_mask)
         target = self.norm2(target + self.dropout2(cross_attn_out))
 
+        # FFN for non-linearity
         ffn_out = self.linear2(self.dropout(self.activation(self.linear1(target))))
         target = self.norm3(target + self.dropout3(ffn_out))
         return target
@@ -151,13 +156,18 @@ class Transformer(nn.Module):
             ``(num_decoder_layers, N, B, D)`` stacked decoder outputs.
         """
         B = src.shape[1]
+        # (N, D) -> (N, 1, D) -> (N, B, D)
         query_pos = query_embed.unsqueeze(dim=1).repeat(1, B, 1)
+
+        # Target is modified by the decoder, starts as (N, B, D) of zeroes
         target = torch.zeros_like(query_pos)
 
+        # Run src through encoder; final output becomes memory/context for decoder
         memory = src
         for encoder_layer in self.encoder_layers:
             memory = encoder_layer(memory, pos_embed, mask)
 
+        # Use all decoder outputs for stronger gradient flow
         outputs = []
         for decoder_layer in self.decoder_layers:
             target = decoder_layer(target, memory, pos_embed, query_pos, mask)

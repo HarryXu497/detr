@@ -52,12 +52,17 @@ def box_iou(b1: Tensor, b2: Tensor) -> tuple[Tensor, Tensor]:
     area1 = box_area(b1)
     area2 = box_area(b2)
 
+    # Insert size 1 dim to allow broadcasting
+    # dim (N, 1, 2) and dim (M, 2) -> (N, M, 2)
     lt = torch.max(b1[:, None, :2], b2[:, :2])
     rb = torch.min(b1[:, None, 2:], b2[:, 2:])
 
     wh = (rb - lt).clamp(min=0)
 
+    # (N, M) (delta x) * (N, M) (delta y)
     intersection = wh[:, :, 0] * wh[:, :, 1]
+    # (N, 1) + (M, ) - (N, M) -> (N, 1) + (N, M) - (N, M)
+    # Otherwise, (N) + (M) not compatible
     union = area1[:, None] + area2 - intersection
 
     iou = intersection / union
@@ -84,10 +89,13 @@ def generalized_box_iou(b1: Tensor, b2: Tensor) -> Tensor:
     """
     iou, union = box_iou(b1, b2)
 
+    # Insert size 1 dim to allow broadcasting
+    # dim (N, 1, 2) and dim (M, 2) -> (N, M, 2)
     lt = torch.min(b1[:, None, :2], b2[:, :2])
     rb = torch.max(b1[:, None, 2:], b2[:, 2:])
 
     enclosing_box = (rb - lt).clamp(min=0)
+     # (N, M) (delta x of enclosing) * (N, M) (delta y of enclosing)
     enclosing_area = enclosing_box[:, :, 0] * enclosing_box[:, :, 1]
 
     giou = iou - (enclosing_area - union) / enclosing_area
