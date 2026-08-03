@@ -27,3 +27,6 @@ venv = ".venv"
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
+markers = [
+    "slow: long-running integration tests (deselect with '-m \"not slow\"')",
+]
