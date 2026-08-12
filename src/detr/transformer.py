@@ -13,7 +13,7 @@ Positional encodings are supplied on each call and re-added at every layer. The
 decoder content stream (``target``) is initialized to zeros; the learned object
 queries are supplied separately as ``query_pos``.
 """
-
+from __future__ import annotations
 import torch
 from torch import nn, Tensor
 

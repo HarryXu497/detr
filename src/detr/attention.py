@@ -11,7 +11,7 @@ excludes padded positions from the attention.
 Tensors use the sequence-first layout ``(L, B, D)`` (length, batch, feature), matching
 the default layout of :class:`torch.nn.MultiheadAttention`.
 """
-
+from __future__ import annotations
 from torch import nn, Tensor
 
 

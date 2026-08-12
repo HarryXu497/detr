@@ -5,7 +5,7 @@ projects its 2048 channels down to ``d_model`` with a 1x1 convolution. BatchNorm
 frozen (:class:`FrozenBatchNorm2d`) because DETR trains with small batches, so batch
 statistics would be unstable.
 """
-
+from __future__ import annotations
 from torchvision.ops import FrozenBatchNorm2d
 from torchvision.models import resnet50, ResNet50_Weights
 from torchvision.models._utils import IntermediateLayerGetter

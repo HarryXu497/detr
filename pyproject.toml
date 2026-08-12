@@ -20,6 +20,7 @@ where = ["src"]
 
 [tool.pyright]
 include = ["src", "tests"]
+pythonVersion = "3.12"
 typeCheckingMode = "standard"
 venvPath = "."
 venv = ".venv"

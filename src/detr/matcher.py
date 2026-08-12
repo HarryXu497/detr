@@ -5,7 +5,7 @@ weighted sum of a classification term, an L1 box term, and a GIoU term, then sol
 assignment problem with :func:`scipy.optimize.linear_sum_assignment`. The matching is
 non-differentiable and runs under ``torch.no_grad``.
 """
-
+from __future__ import annotations
 import torch
 from torch import nn, Tensor
 from scipy.optimize import linear_sum_assignment

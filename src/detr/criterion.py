@@ -6,7 +6,7 @@ It then applies a classification loss over every query and box regression losses
 (L1 and generalized IoU) over the matched pairs only. The same losses
 are applied to every intermediate decoder layer as auxiliary losses.
 """
-
+from __future__ import annotations
 from dataclasses import dataclass
 
 from torch import nn, Tensor

@@ -15,7 +15,7 @@ Run as a module so the ``detr`` package resolves, e.g.::
 The ``--overfit N`` path restricts training to the first ``N`` images and is the gate that
 must drive the loss down before committing to a full run.
 """
-
+from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path

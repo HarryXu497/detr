@@ -9,7 +9,7 @@ The pairwise functions (:func:`box_iou`, :func:`generalized_box_iou`) take ``(N,
 and ``(M, 4)`` boxes and return an ``(N, M)`` matrix scoring every box in the first set
 against every box in the second.
 """
-
+from __future__ import annotations
 import torch
 from torch import Tensor
 

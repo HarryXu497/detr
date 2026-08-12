@@ -9,7 +9,7 @@ This is the v1 pipeline: every image is resized to a fixed square size so images
 directly and no padding mask is needed. Variable-size images with attention padding masks
 are a later pass.
 """
-
+from __future__ import annotations
 from pathlib import Path
 
 from PIL.Image import Image

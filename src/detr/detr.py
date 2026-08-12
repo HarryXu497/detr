@@ -5,7 +5,7 @@ extracts image features, adds positional encoding, flattens to a token sequence,
 the transformer with learned object queries, and applies a classification head and a
 box-regression head to every decoder layer.
 """
-
+from __future__ import annotations
 from dataclasses import dataclass
 
 import torch

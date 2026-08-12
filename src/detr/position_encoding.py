@@ -5,7 +5,7 @@ distinct vector, so the permutation-invariant attention can recover spatial posi
 Row and column coordinates are each encoded with ``num_pos_feats`` sinusoidal channels
 and concatenated, giving ``2 * num_pos_feats`` channels total (256 for ``d_model=256``).
 """
-
+from __future__ import annotations
 import math
 import torch
 from torch import nn, Tensor

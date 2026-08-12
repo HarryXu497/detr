@@ -8,7 +8,7 @@ one of them. This is the same check that must pass before committing GPU hours t
 real run. It is marked ``slow`` (a few hundred steps through the real model); run the
 fast suite with ``pytest -m "not slow"``.
 """
-
+from __future__ import annotations
 import pytest
 import torch
 
