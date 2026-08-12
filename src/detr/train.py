@@ -67,7 +67,7 @@ def weighted_loss(loss: SetCriterionLoss, weight_dict: dict[str, float]) -> Tens
     return total
 
 
-def build_model_and_criterion(num_classes: int, device: str, num_queries: int = 100) -> tuple[DETR, SetCriterion]:
+def build_model_and_criterion(num_classes: int, device: str, num_queries: int = 100, dropout: float = 0.1) -> tuple[DETR, SetCriterion]:
     """Construct the model and its criterion with the paper's loss weights.
 
     Args:
@@ -80,7 +80,7 @@ def build_model_and_criterion(num_classes: int, device: str, num_queries: int = 
         The DETR model and a :class:`SetCriterion` configured with the paper weights
         (``loss_ce=1, loss_bbox=5, loss_giou=2``) and its own Hungarian matcher.
     """
-    detr = DETR(num_classes=num_classes, num_queries=num_queries).to(device)
+    detr = DETR(num_classes=num_classes, num_queries=num_queries, dropout=dropout).to(device)
     matcher = HungarianMatcher()
     weight_dict = {"loss_ce": 1.0, "loss_bbox": 5.0, "loss_giou": 2.0}
     criterion = SetCriterion(num_classes=num_classes, matcher=matcher, weight_dict=weight_dict).to(device)
@@ -240,6 +240,7 @@ def main() -> None:
     parser.add_argument("--lr-drop", type=int, default=200)
     parser.add_argument("--max-norm", type=float, default=0.1)
     parser.add_argument("--num-queries", type=int, default=100)
+    parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--num-classes", type=int, required=True)
@@ -254,7 +255,7 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model, criterion = build_model_and_criterion(args.num_classes, device, num_queries=args.num_queries)
+    model, criterion = build_model_and_criterion(args.num_classes, device, num_queries=args.num_queries, dropout=args.dropout)
     optimizer = build_optimizer(model, lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_drop)
 

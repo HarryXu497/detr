@@ -96,13 +96,14 @@ class DETR(nn.Module):
         nheads: int = 8,
         num_encoder_layers: int = 6,
         num_decoder_layers: int = 6,
+        dropout: float = 0.1,
         pretrained_backbone: bool = True
     ) -> None:
         super().__init__()
         self.backbone = Backbone(d_model, pretrained=pretrained_backbone)
         self.pos_emb = PositionEmbeddingSine(d_model // 2)
         self.query_emb = nn.Embedding(num_queries, d_model)
-        self.transformer = Transformer(d_model, nheads, num_encoder_layers, num_decoder_layers)
+        self.transformer = Transformer(d_model, nheads, num_encoder_layers, num_decoder_layers, dropout=dropout)
         self.class_head = nn.Linear(d_model, num_classes + 1)
         self.box_head = MLP(d_model, d_model, 4, 3)
 
