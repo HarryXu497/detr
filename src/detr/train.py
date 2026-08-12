@@ -287,7 +287,7 @@ def main() -> None:
 
         print(f"epoch {epoch}: {stats}")
 
-        save_checkpoint(f"{args.output_dir}/{epoch}-checkpoint.pth", model, optimizer, scheduler, epoch)
+        save_checkpoint(f"{args.output_dir}/checkpoint.pth", model, optimizer, scheduler, epoch)
 
         if args.s3_sync:
             subprocess.run(["aws", "s3", "sync", args.output_dir, args.s3_sync], check=False)
