@@ -54,7 +54,7 @@ class PositionEmbeddingSine(nn.Module):
             x_embed = x_embed / (x_embed[:, :, -1:] + eps) * 2 * math.pi
 
         # Compute the denom of the argument to sin and cos
-        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32)
+        dim_t = torch.arange(self.num_pos_feats, dtype=torch.float32, device=mask.device)
         dim_t = self.temperature ** (2 * (dim_t // 2) / self.num_pos_feats)
 
         # Compute the argument to sin and cos

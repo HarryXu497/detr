@@ -44,6 +44,7 @@ class HungarianMatcher(nn.Module):
         """
         pred_logits = output.pred_logits
         pred_boxes = output.pred_boxes
+        device = pred_logits.device
 
         # Flatten predictions across the batch
         B, N = pred_logits.shape[:2]
@@ -89,8 +90,8 @@ class HungarianMatcher(nn.Module):
             # c[i] is (N, n_i)
             row, col = linear_sum_assignment(c[i])
             indices.append((
-                torch.as_tensor(row, dtype=torch.long),
-                torch.as_tensor(col, dtype=torch.long),
+                torch.as_tensor(row, dtype=torch.long, device=device),
+                torch.as_tensor(col, dtype=torch.long, device=device),
             ))
 
         return indices
