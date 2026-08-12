@@ -67,18 +67,20 @@ def weighted_loss(loss: SetCriterionLoss, weight_dict: dict[str, float]) -> Tens
     return total
 
 
-def build_model_and_criterion(num_classes: int, device: str) -> tuple[DETR, SetCriterion]:
+def build_model_and_criterion(num_classes: int, device: str, num_queries: int = 100) -> tuple[DETR, SetCriterion]:
     """Construct the model and its criterion with the paper's loss weights.
 
     Args:
         num_classes: number of object classes, excluding the no-object class.
         device: device to place both modules on.
+        num_queries: number of object queries (detection slots). Must exceed the largest
+            object count in any single image.
 
     Returns:
         The DETR model and a :class:`SetCriterion` configured with the paper weights
         (``loss_ce=1, loss_bbox=5, loss_giou=2``) and its own Hungarian matcher.
     """
-    detr = DETR(num_classes=num_classes).to(device)
+    detr = DETR(num_classes=num_classes, num_queries=num_queries).to(device)
     matcher = HungarianMatcher()
     weight_dict = {"loss_ce": 1.0, "loss_bbox": 5.0, "loss_giou": 2.0}
     criterion = SetCriterion(num_classes=num_classes, matcher=matcher, weight_dict=weight_dict).to(device)
@@ -86,14 +88,15 @@ def build_model_and_criterion(num_classes: int, device: str) -> tuple[DETR, SetC
     return detr, criterion
 
 
-def build_optimizer(model: DETR) -> Optimizer:
+def build_optimizer(model: DETR, lr: float = 1e-4) -> Optimizer:
     """Build the AdamW optimizer with a lower learning rate for the backbone.
 
     The pretrained backbone is fine-tuned gently at ``1e-5`` while the rest of the model
-    trains at ``1e-4``; both share weight decay ``1e-4``.
+    trains at ``lr``; both share weight decay ``1e-4``.
 
     Args:
         model: the DETR model whose parameters are optimized.
+        lr: learning rate for the non-backbone parameters. The backbone stays at ``1e-5``.
 
     Returns:
         An ``AdamW`` optimizer with two parameter groups split on the ``backbone`` prefix.
@@ -103,7 +106,7 @@ def build_optimizer(model: DETR) -> Optimizer:
 
     return AdamW(
         [
-            {"params": other_params, "lr": 1e-4},
+            {"params": other_params, "lr": lr},
             {"params": backbone_params, "lr": 1e-5},
         ],
         weight_decay=1e-4
@@ -233,7 +236,10 @@ def main() -> None:
     parser.add_argument("--ann", default=None)            # COCO annotation JSON (COCO only)
     parser.add_argument("--download", action="store_true")  # fetch VOC on first run (VOC only)
     parser.add_argument("--epochs", type=int, default=300)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lr-drop", type=int, default=200)
+    parser.add_argument("--max-norm", type=float, default=0.1)
+    parser.add_argument("--num-queries", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--num-classes", type=int, required=True)
@@ -248,8 +254,8 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model, criterion = build_model_and_criterion(args.num_classes, device)
-    optimizer = build_optimizer(model)
+    model, criterion = build_model_and_criterion(args.num_classes, device, num_queries=args.num_queries)
+    optimizer = build_optimizer(model, lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_drop)
 
     dataset: Dataset
@@ -276,7 +282,7 @@ def main() -> None:
     # Training loop
     model.train()
     for epoch in range(start_epoch, args.epochs):
-        stats = train_one_epoch(model, criterion, data_loader, optimizer, device, criterion.weight_dict, max_norm=0.1)
+        stats = train_one_epoch(model, criterion, data_loader, optimizer, device, criterion.weight_dict, max_norm=args.max_norm)
         scheduler.step()
 
         print(f"epoch {epoch}: {stats}")
