@@ -17,6 +17,7 @@ must drive the loss down before committing to a full run.
 """
 
 import argparse
+import subprocess
 from pathlib import Path
 
 from detr.criterion import SetCriterion, SetCriterionLoss
@@ -236,6 +237,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="runs/exp")
     parser.add_argument("--resume", default=None)         # path to a checkpoint
     parser.add_argument("--overfit", type=int, default=0)  # 0 = off; N = memorize N images
+    parser.add_argument("--s3-sync", default=None)  # s3://bucket/prefix; None = off.
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -268,6 +270,9 @@ def main() -> None:
         print(f"epoch {epoch}: {stats}")
 
         save_checkpoint(f"{args.output_dir}/{epoch}-checkpoint.pth", model, optimizer, scheduler, epoch)
+
+        if args.s3_sync:
+            subprocess.run(["aws", "s3", "sync", args.output_dir, args.s3_sync], check=False)
 
 
 if __name__ == "__main__":
