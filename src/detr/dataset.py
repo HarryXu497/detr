@@ -1,9 +1,11 @@
-"""Detection dataset and batching for DETR.
+"""Detection datasets and batching for DETR.
 
-Adapts a COCO-format dataset into the target contract the model and criterion expect:
-each item is an image tensor and a dict ``{"labels": (n,), "boxes": (n, 4)}`` with boxes
-in normalized ``cxcywh``. Object counts vary per image, so :func:`collate_fn` stacks the
-images but keeps the targets as a length-``B`` list rather than a single tensor.
+Adapts a detection dataset into the target contract the model and criterion expect: each
+item is an image tensor and a dict ``{"labels": (n,), "boxes": (n, 4)}`` with boxes in
+normalized ``cxcywh``. Two sources are supported behind the same contract:
+:class:`COCODetectionDataset` (COCO-format JSON) and :class:`VOCDetectionDataset` (Pascal
+VOC XML). Object counts vary per image, so :func:`collate_fn` stacks the images but keeps
+the targets as a length-``B`` list rather than a single tensor.
 
 This is the v1 pipeline: every image is resized to a fixed square size so images stack
 directly and no padding mask is needed. Variable-size images with attention padding masks
@@ -18,7 +20,7 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 from torchvision.transforms import v2
-from torchvision.datasets import CocoDetection
+from torchvision.datasets import CocoDetection, VOCDetection
 
 
 def collate_fn(batch: list[tuple[Tensor, dict]]) -> tuple[Tensor, list[dict]]:
@@ -39,7 +41,140 @@ def collate_fn(batch: list[tuple[Tensor, dict]]) -> tuple[Tensor, list[dict]]:
     return torch.stack(images), targets
 
 
-class DetectionDataset(Dataset):
+class VOCDetectionDataset(Dataset):
+    """Pascal VOC detection dataset yielding DETR-format targets.
+
+    Wraps :class:`torchvision.datasets.VOCDetection` and converts each sample into an
+    image tensor plus a target dict. VOC has a fixed set of 20 classes, mapped to a
+    contiguous ``0..19`` range for the classification head; the no-object class is owned
+    by the criterion, so it is not part of this mapping.
+
+    Args:
+        root: directory containing the ``VOCdevkit`` tree.
+        image_set: which split to load (``"train"``, ``"trainval"``, or ``"val"``).
+        image_size: side length the images are resized to. All images become
+            ``image_size x image_size`` so a batch stacks without padding.
+        download: download and extract the VOC archive into ``root`` if absent. Off by
+            default so repeated runs and tests do not re-fetch the ~2 GB archive.
+
+    Attributes:
+        name_to_label: maps a VOC class name to its contiguous label.
+        label_to_name: maps a contiguous label back to its class name.
+    """
+
+    def __init__(
+        self,
+        root: str | Path,
+        image_set: str = "train",
+        image_size: int = 512,
+        download: bool = False,
+    ):
+        self.voc = VOCDetection(root, year="2012", image_set=image_set, download=download)
+        self.classes = [
+            "aeroplane",
+            "bicycle",
+            "bird",
+            "boat",
+            "bottle",
+            "bus",
+            "car",
+            "cat",
+            "chair",
+            "cow",
+            "diningtable",
+            "dog",
+            "horse",
+            "motorbike",
+            "person",
+            "pottedplant",
+            "sheep",
+            "sofa",
+            "train",
+            "tvmonitor",
+        ]
+        # Maps class name to contiguous integer labels
+        self.name_to_label = {n: i for i, n in enumerate(self.classes)}
+        # Reverse mapping
+        self.label_to_name = {i: n for i, n in enumerate(self.classes)}
+
+        self.image_size = image_size
+        self.transform = v2.Compose([
+            v2.Resize((self.image_size, self.image_size)),
+            v2.ToImage(),
+            v2.ToDtype(torch.float32, scale=True),
+            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+
+    def __len__(self):
+        return len(self.voc)
+
+    def __getitem__(self, i: int) -> tuple[Tensor, dict]:
+        """Load one sample as ``(image, target)``.
+
+        Difficult objects and degenerate boxes are dropped, boxes are parsed from VOC's
+        ``xmin, ymin, xmax, ymax`` pixel corners and converted to normalized ``cxcywh``
+        relative to the original image, class names are mapped to contiguous labels, and
+        the image is resized and normalized with ImageNet statistics.
+
+        Args:
+            i: sample index.
+
+        Returns:
+            ``(image, target)`` where ``image`` is ``(3, image_size, image_size)`` and
+            ``target`` is ``{"labels": (n,), "boxes": (n, 4)}``. An image whose objects
+            are all filtered out yields empty ``(0,)`` and ``(0, 4)`` tensors.
+        """
+        voc_item: tuple[Image, dict] = self.voc[i]
+        pil_image, target = voc_item
+
+        W, H = pil_image.size
+        objs: dict | list[dict] = target["annotation"]["object"]
+
+        # single object fix
+        if isinstance(objs, dict):
+            objs = [objs]
+
+        labels: list[int] = []
+
+        boxes: list[list[float]] = []
+        for obj in objs:
+            box = obj["bndbox"]
+            x_min = float(box["xmin"])
+            y_min = float(box["ymin"])
+            x_max = float(box["xmax"])
+            y_max = float(box["ymax"])
+            w = x_max - x_min
+            h = y_max - y_min
+
+            # Drop invalid boxes
+            if w <= 0 or h <= 0:
+                continue
+
+            # Drop difficult objects
+            if obj["difficult"] == "1":
+                continue
+
+            labels.append(self.name_to_label[obj["name"]])
+
+            # Convert to cxcywh
+            boxes.append([
+                ((x_min + x_max) / 2) / W,
+                ((y_max + y_min) / 2) / H,
+                w / W,
+                h / H
+            ])
+
+        # Convert to tensor with shape (m, 4), with values clamped between 0 and 1
+        boxes_t = torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4).clamp(0, 1)
+        # Convert to tensor with shape (m,)
+        labels_t = torch.tensor(labels, dtype=torch.long)
+        # Get transformed image from PIL image
+        image_t: Tensor = self.transform(pil_image)
+
+        return image_t, {"labels": labels_t, "boxes": boxes_t}
+
+
+class COCODetectionDataset(Dataset):
     """COCO detection dataset yielding DETR-format targets.
 
     Wraps :class:`torchvision.datasets.CocoDetection` and converts each sample into an

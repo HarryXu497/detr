@@ -26,10 +26,10 @@ import torch
 from torch import Tensor
 from torch.optim import AdamW, Optimizer
 from torch.optim.lr_scheduler import LRScheduler
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from torch.nn.utils import clip_grad_norm_
 
-from detr.dataset import DetectionDataset, collate_fn
+from detr.dataset import COCODetectionDataset, VOCDetectionDataset, collate_fn
 from detr.detr import DETR, DETROutputWithAuxOutputs
 from detr.matcher import HungarianMatcher
 
@@ -229,10 +229,13 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", required=True)          # dataset root
-    parser.add_argument("--ann", required=True)           # COCO annotation JSON
+    parser.add_argument("--dataset", choices=["coco", "voc"], default="voc")
+    parser.add_argument("--ann", default=None)            # COCO annotation JSON (COCO only)
+    parser.add_argument("--download", action="store_true")  # fetch VOC on first run (VOC only)
     parser.add_argument("--epochs", type=int, default=300)
     parser.add_argument("--lr-drop", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--num-classes", type=int, required=True)
     parser.add_argument("--output-dir", default="runs/exp")
     parser.add_argument("--resume", default=None)         # path to a checkpoint
@@ -240,19 +243,28 @@ def main() -> None:
     parser.add_argument("--s3-sync", default=None)  # s3://bucket/prefix; None = off.
     args = parser.parse_args()
 
+    if args.dataset == "coco" and args.ann is None:
+        parser.error("--ann is required for --dataset coco")
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
     model, criterion = build_model_and_criterion(args.num_classes, device)
     optimizer = build_optimizer(model)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_drop)
 
-    dataset = DetectionDataset(args.data, args.ann, image_size=512)
+    dataset: Dataset
+    if args.dataset == "coco":
+        dataset = COCODetectionDataset(args.data, args.ann, image_size=512)
+    else:
+        dataset = VOCDetectionDataset(args.data, image_set="train", image_size=512,
+                                      download=args.download)
 
     if args.overfit > 0:
         dataset = torch.utils.data.Subset(dataset, range(args.overfit))
         # TODO: need to turn off any image augmentation in the future (flips, crops, etc)
 
-    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=1, collate_fn=collate_fn)
+    data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
+                             pin_memory=True, persistent_workers=args.num_workers > 0, collate_fn=collate_fn)
 
     start_epoch = 0
     if args.resume:
