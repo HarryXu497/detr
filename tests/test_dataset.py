@@ -160,11 +160,11 @@ def voc_dataset(voc_root):
 
 def test_voc_class_map_is_contiguous_without_background(voc_dataset):
     # 20 VOC classes mapped to 0..19; the no-object class is the criterion's, not here.
-    assert len(voc_dataset.classes) == 20
-    assert "background" not in voc_dataset.name_to_label
-    assert voc_dataset.name_to_label["aeroplane"] == 0
-    assert voc_dataset.name_to_label["person"] == 14
-    assert voc_dataset.name_to_label["tvmonitor"] == 19
+    assert len(voc_dataset.CLASSES) == 20
+    assert "background" not in voc_dataset.NAME_TO_LABEL
+    assert voc_dataset.NAME_TO_LABEL["aeroplane"] == 0
+    assert voc_dataset.NAME_TO_LABEL["person"] == 14
+    assert voc_dataset.NAME_TO_LABEL["tvmonitor"] == 19
 
 
 def test_voc_image_is_resized_to_square(voc_dataset):

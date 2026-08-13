@@ -62,6 +62,31 @@ class VOCDetectionDataset(Dataset):
         label_to_name: maps a contiguous label back to its class name.
     """
 
+    CLASSES = [
+        "aeroplane",
+        "bicycle",
+        "bird",
+        "boat",
+        "bottle",
+        "bus",
+        "car",
+        "cat",
+        "chair",
+        "cow",
+        "diningtable",
+        "dog",
+        "horse",
+        "motorbike",
+        "person",
+        "pottedplant",
+        "sheep",
+        "sofa",
+        "train",
+        "tvmonitor",
+    ]
+    NAME_TO_LABEL = {n: i for i, n in enumerate(CLASSES)}
+    LABEL_TO_NAME = {i: n for i, n in enumerate(CLASSES)}
+
     def __init__(
         self,
         root: str | Path,
@@ -70,32 +95,6 @@ class VOCDetectionDataset(Dataset):
         download: bool = False,
     ):
         self.voc = VOCDetection(root, year="2012", image_set=image_set, download=download)
-        self.classes = [
-            "aeroplane",
-            "bicycle",
-            "bird",
-            "boat",
-            "bottle",
-            "bus",
-            "car",
-            "cat",
-            "chair",
-            "cow",
-            "diningtable",
-            "dog",
-            "horse",
-            "motorbike",
-            "person",
-            "pottedplant",
-            "sheep",
-            "sofa",
-            "train",
-            "tvmonitor",
-        ]
-        # Maps class name to contiguous integer labels
-        self.name_to_label = {n: i for i, n in enumerate(self.classes)}
-        # Reverse mapping
-        self.label_to_name = {i: n for i, n in enumerate(self.classes)}
 
         self.image_size = image_size
         self.transform = v2.Compose([
@@ -154,7 +153,7 @@ class VOCDetectionDataset(Dataset):
             if obj["difficult"] == "1":
                 continue
 
-            labels.append(self.name_to_label[obj["name"]])
+            labels.append(self.NAME_TO_LABEL[obj["name"]])
 
             # Convert to cxcywh
             boxes.append([
