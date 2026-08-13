@@ -10,6 +10,7 @@ dependencies = [
     "matplotlib",
     "numpy",
     "tqdm",
+    "torchmetrics",
 ]
 
 [project.optional-dependencies]

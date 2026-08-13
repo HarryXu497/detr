@@ -222,5 +222,7 @@ __marimo__/
 docs/
 
 *.pem
+*.pt
+*.pth
 
 .DS_Store
