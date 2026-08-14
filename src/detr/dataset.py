@@ -26,22 +26,56 @@ from torchvision.datasets import CocoDetection, VOCDetection
 from detr.box_ops import box_xyxy_to_cxcywh
 
 
-def collate_fn(batch: list[tuple[Tensor, dict]]) -> tuple[Tensor, list[dict]]:
-    """Assemble per-image samples into one batch.
+def eval_transform(image_size: int):
+    """Deterministic image transform for evaluation and inference.
+
+    Aspect-preserving resize (shortest side to ``image_size``, longest side capped at
+    ``2 * image_size``) followed by tensor conversion and ImageNet normalization. Shared by
+    the dataset's non-augmented path and :mod:`detr.predict` so training and inference
+    preprocess images identically.
+    """
+    return v2.Compose([
+        v2.Resize(image_size, max_size=image_size*2, antialias=True),
+        v2.ToImage(),
+        v2.ToDtype(torch.float32, scale=True),
+        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+
+def collate_fn(batch: list[tuple[Tensor, dict]]) -> tuple[Tensor, Tensor, list[dict]]:
+    """Pad variable-size images into one batch and build the padding mask.
 
     Args:
-        batch: list of ``(image, target)`` pairs, where every image is the same
-            ``(3, S, S)`` size and ``target`` is a dict with ``labels`` and ``boxes``.
+        batch: list of ``(image, target)`` pairs. Images may have different ``(3, H, W)``
+            sizes (aspect-preserving resize); ``target`` is a dict with ``labels`` and
+            ``boxes``.
 
     Returns:
-        ``(images, targets)`` where ``images`` is ``(B, 3, S, S)`` and ``targets`` is the
-        length-``B`` list of target dicts, left variable-length because the object count
-        differs per image.
+        ``(images, mask, targets)``. ``images`` ``(B, 3, H_max, W_max)`` places each image
+        top-left in a zero-padded canvas of the batch's max height and width. ``mask``
+        ``(B, H_max, W_max)`` is ``True`` over padded pixels and ``False`` over real ones,
+        so attention can ignore the padding. ``targets`` is the length-``B`` list of target
+        dicts, kept variable-length because the object count differs per image.
     """
+    # Each (3, h_i, w_i)
     images = [img for img, _ in batch]
     targets = [target for _, target in batch]
+    max_h = max(img.shape[1] for img in images)
+    max_w = max(img.shape[2] for img in images)
+    # (B, 3, h_max, w_max)
+    batched = images[0].new_zeros(len(images), 3, max_h, max_w)
+    # (B, h_max, w_max); all ones -> mask everything
+    mask = torch.ones(len(images), max_h, max_w, dtype=torch.bool)
 
-    return torch.stack(images), targets
+    for i, img in enumerate(images):
+        _, h, w = img.shape
+
+        # h x w chunk has the image, the rest is zeroes
+        batched[i, :, :h, :w].copy_(img)
+        # Unmask the portion with the image
+        mask[i, :h, :w] = False
+
+    return batched, mask, targets
 
 
 class VOCDetectionDataset(Dataset):
@@ -108,7 +142,7 @@ class VOCDetectionDataset(Dataset):
         if self.augment:
             self.transform = v2.Compose([
                 v2.RandomHorizontalFlip(0.5),
-                v2.RandomResizedCrop(image_size, scale=(0.5, 1.0), antialias=True),
+                v2.RandomShortestSize(min_size=[384, 448, 512, 576, 640], max_size=1024, antialias=True),
                 v2.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
                 v2.SanitizeBoundingBoxes(),
                 v2.ToImage(),
@@ -116,12 +150,7 @@ class VOCDetectionDataset(Dataset):
                 v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
         else:
-            self.transform = v2.Compose([
-                v2.Resize((self.image_size, self.image_size)),
-                v2.ToImage(),
-                v2.ToDtype(torch.float32, scale=True),
-                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ])
+            self.transform = eval_transform(image_size)
 
     def __len__(self):
         return len(self.voc)
@@ -254,7 +283,7 @@ class COCODetectionDataset(Dataset):
 
         self.image_size = image_size
         self.transform = v2.Compose([
-            v2.Resize((self.image_size, self.image_size)),
+            v2.Resize(self.image_size, max_size=image_size * 2, antialias=True),
             v2.ToImage(),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])

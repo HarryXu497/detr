@@ -21,7 +21,7 @@ from torch import Tensor
 from torchvision.transforms import v2
 from PIL import Image
 
-from detr.dataset import VOCDetectionDataset
+from detr.dataset import VOCDetectionDataset, eval_transform
 from detr.postprocess import postprocess
 from detr.detr import DETR, DETROutputWithAuxOutputs
 from detr.train import load_checkpoint
@@ -46,12 +46,7 @@ def main() -> None:
     parser.add_argument("--output", default="pred.png")
     args = parser.parse_args()
 
-    transform = v2.Compose([
-        v2.Resize((args.image_size, args.image_size)),
-        v2.ToImage(),
-        v2.ToDtype(torch.float32, scale=True),
-        v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    transform = eval_transform(args.image_size)
 
     model = DETR(num_classes=args.num_classes, num_queries=args.num_queries, dropout=args.dropout)
     load_checkpoint(args.checkpoint, model)

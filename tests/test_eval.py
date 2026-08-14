@@ -14,7 +14,7 @@ class _StubModel(nn.Module):
         super().__init__()
         self._output = output
 
-    def forward(self, _images: torch.Tensor) -> DETROutputWithAuxOutputs:
+    def forward(self, _images: torch.Tensor, _mask: torch.Tensor | None = None) -> DETROutputWithAuxOutputs:
         return self._output
 
 
@@ -37,7 +37,8 @@ def test_evaluate_perfect_predictions_gives_map_one():
     targets = [{"labels": gt_labels, "boxes": gt_boxes}]
 
     model = _StubModel(_output_for(gt_boxes, gt_labels, num_classes=3))
-    stats = evaluate(model, [(torch.randn(1, 3, 64, 64), targets)], "cpu")  # type: ignore[arg-type]
+    mask = torch.zeros(1, 64, 64, dtype=torch.bool)
+    stats = evaluate(model, [(torch.randn(1, 3, 64, 64), mask, targets)], "cpu")  # type: ignore[arg-type]
 
     assert stats["map_50"].item() > 0.99
     assert stats["map"].item() > 0.99
@@ -53,6 +54,7 @@ def test_evaluate_mislocated_predictions_give_zero_map():
     # same labels, but boxes in far corners -> IoU 0 with the targets
     pred_boxes = torch.tensor([[0.9, 0.9, 0.05, 0.05], [0.95, 0.05, 0.05, 0.05]])
     model = _StubModel(_output_for(pred_boxes, gt_labels, num_classes=3))
-    stats = evaluate(model, [(torch.randn(1, 3, 64, 64), targets)], "cpu")  # type: ignore[arg-type]
+    mask = torch.zeros(1, 64, 64, dtype=torch.bool)
+    stats = evaluate(model, [(torch.randn(1, 3, 64, 64), mask, targets)], "cpu")  # type: ignore[arg-type]
 
     assert stats["map_50"].item() < 0.01

@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import nn, Tensor
+import torch.nn.functional as F
 
 from detr.backbone import Backbone
 from detr.position_encoding import PositionEmbeddingSine
@@ -107,20 +108,39 @@ class DETR(nn.Module):
         self.class_head = nn.Linear(d_model, num_classes + 1)
         self.box_head = MLP(d_model, d_model, 4, 3)
 
-    def forward(self, x: Tensor) -> DETROutputWithAuxOutputs:
-        """``(B, 3, H, W)`` image batch -> predictions with auxiliary outputs."""
+    def forward(self, x: Tensor, mask: Tensor | None = None) -> DETROutputWithAuxOutputs:
+        """Run the detector on an image batch.
+
+        Args:
+            x: ``(B, 3, H, W)`` image batch.
+            mask: optional ``(B, H, W)`` padding mask, ``True`` over padded pixels. It is
+                downsampled to the feature grid and threaded into the position encoding and
+                attention so padded regions are ignored. ``None`` means no padding (e.g. a
+                single image), treated as all-real.
+
+        Returns:
+            The final-layer predictions plus per-layer auxiliary predictions.
+        """
         features: Tensor = self.backbone(x)
 
         B, _, h, w = features.shape
-        mask = torch.zeros(B, h, w, dtype=torch.bool, device=x.device)
-        pos = self.pos_emb(mask)
+        if mask is None:
+            feat_mask = torch.zeros(B, h, w, dtype=torch.bool, device=x.device)
+        else:
+            # downsample pixel-resolution mask (B,H,W) to match the feature grid (B,h,w)
+            feat_mask = F.interpolate(mask[:, None].float(), size=(h, w)).to(torch.bool)[:, 0]
+
+        pos = self.pos_emb(feat_mask)
 
         # (B, d_model, h, w) -> (B, d_model, h * w) -> (h * w, B, d_model)
         src = features.flatten(2).permute(2, 0, 1)
         pos = pos.flatten(2).permute(2, 0, 1)
 
+        # (B, h, w) -> (B, h * w)
+        flat_mask = feat_mask.flatten(1)
+
         # (num_decoder_layers, N, B, D) -> (num_decoder_layers, B, N, D)
-        hs: Tensor = self.transformer(src, pos, self.query_emb.weight)
+        hs: Tensor = self.transformer(src, pos, self.query_emb.weight, mask=flat_mask)
         hs = hs.transpose(1, 2)
 
         # (num_decoder_layers, B, N, D) -> (num_decoder_layers, B, N, num_classes + 1)

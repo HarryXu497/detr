@@ -8,16 +8,35 @@ from PIL import Image
 from detr.dataset import collate_fn, COCODetectionDataset, VOCDetectionDataset
 
 
-def test_collate_stacks_fixed_size_images():
+def test_collate_stacks_same_size_images_with_empty_mask():
     batch = [
         (torch.randn(3, 512, 512), {"labels": torch.tensor([1]), "boxes": torch.rand(1, 4)}),
         (torch.randn(3, 512, 512), {"labels": torch.tensor([2, 3]), "boxes": torch.rand(2, 4)}),
     ]
-    images, targets = collate_fn(batch)
+    images, mask, targets = collate_fn(batch)
     assert images.shape == (2, 3, 512, 512)
+    assert mask.shape == (2, 512, 512)
+    assert not mask.any()      # same-size batch -> nothing padded
     assert isinstance(targets, list) and len(targets) == 2
     assert targets[0]["labels"].tolist() == [1]
     assert targets[1]["boxes"].shape == (2, 4)
+
+
+def test_collate_pads_variable_size_images_and_builds_mask():
+    batch = [
+        (torch.randn(3, 400, 500), {"labels": torch.tensor([1]), "boxes": torch.rand(1, 4)}),
+        (torch.randn(3, 512, 480), {"labels": torch.tensor([2]), "boxes": torch.rand(1, 4)}),
+    ]
+    images, mask, targets = collate_fn(batch)
+    assert images.shape == (2, 3, 512, 500)   # padded to per-dim max
+    assert mask.shape == (2, 512, 500)
+    # image 0 is 400x500 -> rows >=400 are padding, the real region is not
+    assert mask[0, 400:, :].all()
+    assert not mask[0, :400, :].any()
+    # image 1 is 512x480 -> cols >=480 are padding
+    assert mask[1, :, 480:].all()
+    assert not mask[1, :, :480].any()
+    assert len(targets) == 2
 
 
 def test_targets_kept_as_variable_length_list():
@@ -26,7 +45,7 @@ def test_targets_kept_as_variable_length_list():
                                     "boxes": torch.zeros(0, 4)}),
         (torch.randn(3, 512, 512), {"labels": torch.tensor([5]), "boxes": torch.rand(1, 4)}),
     ]
-    _, targets = collate_fn(batch)
+    _, _, targets = collate_fn(batch)
     assert targets[0]["labels"].numel() == 0   # image with no objects is allowed
     assert targets[1]["labels"].numel() == 1
 
@@ -85,11 +104,12 @@ def test_category_remap_is_contiguous(dataset):
     assert dataset.label_to_name == {0: "person", 1: "airplane", 2: "toothbrush"}
 
 
-def test_image_is_resized_to_square(dataset):
-    # Would have caught Resize(int), which preserves aspect ratio and yields non-square.
+def test_image_is_aspect_preserving_resized(dataset):
+    # Aspect-preserving resize: shortest side hits image_size, not squished to a square.
     image, _ = dataset[0]
-    assert image.shape == (3, 512, 512)
-    assert image.dtype == torch.float32
+    assert image.shape[0] == 3 and image.dtype == torch.float32
+    assert min(image.shape[1], image.shape[2]) == 512
+    assert image.shape[1] != image.shape[2]   # 640x480 source stays non-square
 
 
 def test_getitem_filters_and_normalizes_boxes(dataset):
@@ -111,8 +131,12 @@ def test_image_with_only_filtered_annotations_is_empty(dataset):
 
 
 def test_collate_over_real_items_stacks(dataset):
-    images, targets = collate_fn([dataset[0], dataset[1]])
-    assert images.shape == (2, 3, 512, 512)
+    a, b = dataset[0], dataset[1]
+    images, mask, targets = collate_fn([a, b])
+    max_h = max(a[0].shape[1], b[0].shape[1])
+    max_w = max(a[0].shape[2], b[0].shape[2])
+    assert images.shape == (2, 3, max_h, max_w)   # padded to the batch's per-dim max
+    assert mask.shape == (2, max_h, max_w)
     assert len(targets) == 2
     assert targets[0]["boxes"].shape == (1, 4)
     assert targets[1]["boxes"].shape == (0, 4)
@@ -167,10 +191,11 @@ def test_voc_class_map_is_contiguous_without_background(voc_dataset):
     assert voc_dataset.NAME_TO_LABEL["tvmonitor"] == 19
 
 
-def test_voc_image_is_resized_to_square(voc_dataset):
+def test_voc_image_is_aspect_preserving_resized(voc_dataset):
     image, _ = voc_dataset[0]
-    assert image.shape == (3, 512, 512)
-    assert image.dtype == torch.float32
+    assert image.shape[0] == 3 and image.dtype == torch.float32
+    assert min(image.shape[1], image.shape[2]) == 512   # shortest side hits image_size
+    assert image.shape[1] != image.shape[2]             # 640x480 stays non-square
 
 
 def test_voc_getitem_parses_and_normalizes_boxes(voc_dataset):
@@ -191,8 +216,12 @@ def test_voc_difficult_objects_are_dropped(voc_dataset):
 
 
 def test_voc_collate_over_real_items_stacks(voc_dataset):
-    images, targets = collate_fn([voc_dataset[0], voc_dataset[1]])
-    assert images.shape == (2, 3, 512, 512)
+    a, b = voc_dataset[0], voc_dataset[1]
+    images, mask, targets = collate_fn([a, b])
+    max_h = max(a[0].shape[1], b[0].shape[1])
+    max_w = max(a[0].shape[2], b[0].shape[2])
+    assert images.shape == (2, 3, max_h, max_w)
+    assert mask.shape == (2, max_h, max_w)
     assert len(targets) == 2
     assert targets[0]["boxes"].shape == (1, 4)
     assert targets[1]["boxes"].shape == (0, 4)
@@ -211,7 +240,7 @@ def test_voc_augment_transforms_boxes_and_keeps_them_valid(voc_dataset_aug):
         torch.manual_seed(s)
         image, target = voc_dataset_aug[0]
         boxes, labels = target["boxes"], target["labels"]
-        assert image.shape == (3, 512, 512) and image.dtype == torch.float32
+        assert image.shape[0] == 3 and image.dtype == torch.float32   # variable size under augmentation
         assert boxes.shape[0] == labels.shape[0]        # a dropped box drops its label too
         if boxes.numel():
             assert boxes.shape[1] == 4

@@ -152,13 +152,14 @@ def train_one_epoch(
     }
     num_batches = 0
 
-    for images, targets in data_loader:
+    for images, mask, targets in data_loader:
         # Move to device
         images = images.to(device)
+        mask = mask.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 
         # Compute outputs
-        out: DETROutputWithAuxOutputs = model(images)
+        out: DETROutputWithAuxOutputs = model(images, mask)
         loss: SetCriterionLoss = criterion(out, targets)
         total = weighted_loss(loss, weight_dict)
 

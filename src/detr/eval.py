@@ -38,7 +38,7 @@ def evaluate(model: DETR, data_loader: DataLoader, device: str) -> dict:
 
     Args:
         model: the trained DETR model.
-        data_loader: yields ``(images, targets)`` from :func:`detr.dataset.collate_fn`.
+        data_loader: yields ``(images, mask, targets)`` from :func:`detr.dataset.collate_fn`.
         device: device to run the forward pass on. Metric accumulation is on CPU.
 
     Returns:
@@ -48,9 +48,10 @@ def evaluate(model: DETR, data_loader: DataLoader, device: str) -> dict:
     metric = MeanAveragePrecision(box_format="xyxy")
     model.eval()
 
-    for images, targets in data_loader:
+    for images, mask, targets in data_loader:
         images = images.to(device)
-        out: DETROutputWithAuxOutputs = model(images)
+        mask = mask.to(device)
+        out: DETROutputWithAuxOutputs = model(images, mask)
         # Normalized space
         # (B, 2) of ones instead of W, H
         sizes = torch.ones(images.shape[0], 2, device=device)
