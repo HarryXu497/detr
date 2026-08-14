@@ -196,3 +196,32 @@ def test_voc_collate_over_real_items_stacks(voc_dataset):
     assert len(targets) == 2
     assert targets[0]["boxes"].shape == (1, 4)
     assert targets[1]["boxes"].shape == (0, 4)
+
+
+@pytest.fixture(scope="module")
+def voc_dataset_aug(voc_root):
+    return VOCDetectionDataset(str(voc_root), image_set="train", image_size=512, augment=True)
+
+
+def test_voc_augment_transforms_boxes_and_keeps_them_valid(voc_dataset_aug):
+    """Augmentation moves the box with the image (so it varies across draws) while keeping
+    the output contract: square image, normalized cxcywh in [0,1], labels in sync."""
+    seen = set()
+    for s in range(6):
+        torch.manual_seed(s)
+        image, target = voc_dataset_aug[0]
+        boxes, labels = target["boxes"], target["labels"]
+        assert image.shape == (3, 512, 512) and image.dtype == torch.float32
+        assert boxes.shape[0] == labels.shape[0]        # a dropped box drops its label too
+        if boxes.numel():
+            assert boxes.shape[1] == 4
+            assert boxes.min() >= 0.0 and boxes.max() <= 1.0
+            seen.add(tuple(round(v, 4) for v in boxes[0].tolist()))
+    assert len(seen) > 1     # the box genuinely varies -> augmentation is active
+
+
+def test_voc_augment_empty_image_stays_empty(voc_dataset_aug):
+    torch.manual_seed(0)
+    _, target = voc_dataset_aug[1]        # only a difficult object -> filtered out
+    assert target["boxes"].shape == (0, 4)
+    assert target["labels"].shape == (0,)

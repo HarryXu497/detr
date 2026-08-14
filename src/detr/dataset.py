@@ -19,8 +19,11 @@ from PIL.Image import Image
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
+from torchvision import tv_tensors
 from torchvision.transforms import v2
 from torchvision.datasets import CocoDetection, VOCDetection
+
+from detr.box_ops import box_xyxy_to_cxcywh
 
 
 def collate_fn(batch: list[tuple[Tensor, dict]]) -> tuple[Tensor, list[dict]]:
@@ -56,10 +59,13 @@ class VOCDetectionDataset(Dataset):
             ``image_size x image_size`` so a batch stacks without padding.
         download: download and extract the VOC archive into ``root`` if absent. Off by
             default so repeated runs and tests do not re-fetch the ~2 GB archive.
+        augment: apply random training augmentation (horizontal flip, resized crop, colour
+            jitter) that transforms the image and boxes together. Off by default so the
+            validation/inference path and the overfit gate stay deterministic.
 
     Attributes:
-        name_to_label: maps a VOC class name to its contiguous label.
-        label_to_name: maps a contiguous label back to its class name.
+        NAME_TO_LABEL: maps a VOC class name to its contiguous label.
+        LABEL_TO_NAME: maps a contiguous label back to its class name.
     """
 
     CLASSES = [
@@ -93,16 +99,29 @@ class VOCDetectionDataset(Dataset):
         image_set: str = "train",
         image_size: int = 512,
         download: bool = False,
+        augment: bool = False
     ):
         self.voc = VOCDetection(root, year="2012", image_set=image_set, download=download)
 
         self.image_size = image_size
-        self.transform = v2.Compose([
-            v2.Resize((self.image_size, self.image_size)),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
+        self.augment = augment
+        if self.augment:
+            self.transform = v2.Compose([
+                v2.RandomHorizontalFlip(0.5),
+                v2.RandomResizedCrop(image_size, scale=(0.5, 1.0), antialias=True),
+                v2.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+                v2.SanitizeBoundingBoxes(),
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        else:
+            self.transform = v2.Compose([
+                v2.Resize((self.image_size, self.image_size)),
+                v2.ToImage(),
+                v2.ToDtype(torch.float32, scale=True),
+                v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ])
 
     def __len__(self):
         return len(self.voc)
@@ -110,10 +129,12 @@ class VOCDetectionDataset(Dataset):
     def __getitem__(self, i: int) -> tuple[Tensor, dict]:
         """Load one sample as ``(image, target)``.
 
-        Difficult objects and degenerate boxes are dropped, boxes are parsed from VOC's
-        ``xmin, ymin, xmax, ymax`` pixel corners and converted to normalized ``cxcywh``
-        relative to the original image, class names are mapped to contiguous labels, and
-        the image is resized and normalized with ImageNet statistics.
+        Difficult objects and degenerate boxes are dropped, class names are mapped to
+        contiguous labels, and the image is normalized with ImageNet statistics. When
+        ``augment`` is set, the boxes are carried through the augmentation pipeline as a
+        :class:`~torchvision.tv_tensors.BoundingBoxes` so flips and crops transform them in
+        sync with the image (a crop that removes a box drops its label too); otherwise the
+        image is simply resized. Boxes are returned as normalized ``cxcywh`` either way.
 
         Args:
             i: sample index.
@@ -155,20 +176,46 @@ class VOCDetectionDataset(Dataset):
 
             labels.append(self.NAME_TO_LABEL[obj["name"]])
 
-            # Convert to cxcywh
-            boxes.append([
-                ((x_min + x_max) / 2) / W,
-                ((y_max + y_min) / 2) / H,
-                w / W,
-                h / H
-            ])
+            if self.augment:
+                # Keep as xyxy
+                boxes.append([
+                    x_min,
+                    y_min,
+                    x_max,
+                    y_max
+                ])
+            else:
+                # Convert to cxcywh
+                boxes.append([
+                    ((x_min + x_max) / 2) / W,
+                    ((y_max + y_min) / 2) / H,
+                    w / W,
+                    h / H
+                ])
 
-        # Convert to tensor with shape (m, 4), with values clamped between 0 and 1
-        boxes_t = torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4).clamp(0, 1)
-        # Convert to tensor with shape (m,)
-        labels_t = torch.tensor(labels, dtype=torch.long)
-        # Get transformed image from PIL image
-        image_t: Tensor = self.transform(pil_image)
+        if self.augment:
+            # Convert to tensor with shape (m, 4)
+            xyxy = torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4)
+
+            target = {
+                "boxes": tv_tensors.BoundingBoxes(xyxy, format=tv_tensors.BoundingBoxFormat.XYXY, canvas_size=(H, W)), # pyright: ignore[reportCallIssue]
+                "labels": torch.tensor(labels, dtype=torch.long)
+            }
+
+            # Transform image and boxes/labels together
+            image_t, target = self.transform(pil_image, target)
+            # Normalized xyxy
+            boxes_t = target["boxes"].as_subclass(torch.Tensor) / self.image_size
+            # Normalized cxcywh
+            boxes_t = box_xyxy_to_cxcywh(boxes_t).clamp(0, 1)
+            labels_t = target["labels"]
+        else:
+            # Convert to tensor with shape (m, 4), with values clamped between 0 and 1
+            boxes_t = torch.tensor(boxes, dtype=torch.float32).reshape(-1, 4).clamp(0, 1)
+            # Convert to tensor with shape (m,)
+            labels_t = torch.tensor(labels, dtype=torch.long)
+            # Get transformed image from PIL image
+            image_t: Tensor = self.transform(pil_image)
 
         return image_t, {"labels": labels_t, "boxes": boxes_t}
 

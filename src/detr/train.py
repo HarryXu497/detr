@@ -67,7 +67,9 @@ def weighted_loss(loss: SetCriterionLoss, weight_dict: dict[str, float]) -> Tens
     return total
 
 
-def build_model_and_criterion(num_classes: int, device: str, num_queries: int = 100, dropout: float = 0.1) -> tuple[DETR, SetCriterion]:
+def build_model_and_criterion(
+        num_classes: int, device: str, num_queries: int = 100, dropout: float = 0.1) -> tuple[
+        DETR, SetCriterion]:
     """Construct the model and its criterion with the paper's loss weights.
 
     Args:
@@ -236,6 +238,7 @@ def main() -> None:
     parser.add_argument("--ann", default=None)            # COCO annotation JSON (COCO only)
     parser.add_argument("--download", action="store_true")  # fetch VOC on first run (VOC only)
     parser.add_argument("--epochs", type=int, default=300)
+    parser.add_argument("--keep", type=int, default=5)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--lr-drop", type=int, default=200)
     parser.add_argument("--max-norm", type=float, default=0.1)
@@ -255,7 +258,8 @@ def main() -> None:
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    model, criterion = build_model_and_criterion(args.num_classes, device, num_queries=args.num_queries, dropout=args.dropout)
+    model, criterion = build_model_and_criterion(
+        args.num_classes, device, num_queries=args.num_queries, dropout=args.dropout)
     optimizer = build_optimizer(model, lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_drop)
 
@@ -264,7 +268,7 @@ def main() -> None:
         dataset = COCODetectionDataset(args.data, args.ann, image_size=512)
     else:
         dataset = VOCDetectionDataset(args.data, image_set="train", image_size=512,
-                                      download=args.download)
+                                      download=args.download, augment=args.overfit == 0)
 
     if args.overfit > 0:
         dataset = torch.utils.data.Subset(dataset, range(args.overfit))
@@ -283,15 +287,21 @@ def main() -> None:
     # Training loop
     model.train()
     for epoch in range(start_epoch, args.epochs):
-        stats = train_one_epoch(model, criterion, data_loader, optimizer, device, criterion.weight_dict, max_norm=args.max_norm)
+        stats = train_one_epoch(model, criterion, data_loader, optimizer, device,
+                                criterion.weight_dict, max_norm=args.max_norm)
         scheduler.step()
 
         print(f"epoch {epoch}: {stats}")
 
+        # Stable latest
         save_checkpoint(f"{args.output_dir}/checkpoint.pth", model, optimizer, scheduler, epoch)
+        # Rolling snapshot
+        save_checkpoint(f"{args.output_dir}/{epoch}-checkpoint.pth", model, optimizer, scheduler, epoch)
+        # Drop the snapshot from 'keep' epoch ago
+        (Path(args.output_dir) / f"{epoch - args.keep}-checkpoint.pth").unlink(missing_ok=True)
 
         if args.s3_sync:
-            subprocess.run(["aws", "s3", "sync", args.output_dir, args.s3_sync], check=False)
+            subprocess.run(["aws", "s3", "sync", args.output_dir, args.s3_sync, "--delete"], check=False)
 
 
 if __name__ == "__main__":
