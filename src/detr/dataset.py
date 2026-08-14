@@ -4,12 +4,12 @@ Adapts a detection dataset into the target contract the model and criterion expe
 item is an image tensor and a dict ``{"labels": (n,), "boxes": (n, 4)}`` with boxes in
 normalized ``cxcywh``. Two sources are supported behind the same contract:
 :class:`COCODetectionDataset` (COCO-format JSON) and :class:`VOCDetectionDataset` (Pascal
-VOC XML). Object counts vary per image, so :func:`collate_fn` stacks the images but keeps
-the targets as a length-``B`` list rather than a single tensor.
+VOC XML).
 
-This is the v1 pipeline: every image is resized to a fixed square size so images stack
-directly and no padding mask is needed. Variable-size images with attention padding masks
-are a later pass.
+Images are resized preserving aspect ratio, so within a batch they have different sizes.
+:func:`collate_fn` pads them to a common size and returns a padding mask alongside the
+stacked images; the targets stay a length-``B`` list because the object count differs per
+image. The mask lets the model ignore the padded regions (see :meth:`DETR.forward`).
 """
 from __future__ import annotations
 from pathlib import Path
@@ -89,8 +89,8 @@ class VOCDetectionDataset(Dataset):
     Args:
         root: directory containing the ``VOCdevkit`` tree.
         image_set: which split to load (``"train"``, ``"trainval"``, or ``"val"``).
-        image_size: side length the images are resized to. All images become
-            ``image_size x image_size`` so a batch stacks without padding.
+        image_size: shortest-side length the images are resized to, preserving aspect
+            ratio (longest side capped at ``2 * image_size``).
         download: download and extract the VOC archive into ``root`` if absent. Off by
             default so repeated runs and tests do not re-fetch the ~2 GB archive.
         augment: apply random training augmentation (horizontal flip, resized crop, colour
@@ -169,9 +169,10 @@ class VOCDetectionDataset(Dataset):
             i: sample index.
 
         Returns:
-            ``(image, target)`` where ``image`` is ``(3, image_size, image_size)`` and
-            ``target`` is ``{"labels": (n,), "boxes": (n, 4)}``. An image whose objects
-            are all filtered out yields empty ``(0,)`` and ``(0, 4)`` tensors.
+            ``(image, target)`` where ``image`` is ``(3, H, W)`` — resized preserving
+            aspect ratio, so ``H`` and ``W`` vary per image — and ``target`` is
+            ``{"labels": (n,), "boxes": (n, 4)}``. An image whose objects are all filtered
+            out yields empty ``(0,)`` and ``(0, 4)`` tensors.
         """
         voc_item: tuple[Image, dict] = self.voc[i]
         pil_image, target = voc_item
@@ -259,8 +260,8 @@ class COCODetectionDataset(Dataset):
     Args:
         root: directory of images.
         annFile: path to the COCO annotation JSON.
-        image_size: side length the images are resized to. All images become
-            ``image_size x image_size`` so a batch stacks without padding.
+        image_size: shortest-side length the images are resized to, preserving aspect
+            ratio (longest side capped at ``2 * image_size``).
 
     Attributes:
         cat_id_to_label: maps a sparse COCO category id to its contiguous label.
