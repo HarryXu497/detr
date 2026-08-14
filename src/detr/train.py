@@ -272,7 +272,6 @@ def main() -> None:
 
     if args.overfit > 0:
         dataset = torch.utils.data.Subset(dataset, range(args.overfit))
-        # TODO: need to turn off any image augmentation in the future (flips, crops, etc)
 
     data_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers,
                              pin_memory=True, persistent_workers=args.num_workers > 0, collate_fn=collate_fn)
