@@ -235,9 +235,12 @@ class VOCDetectionDataset(Dataset):
             # Transform image and boxes/labels together
             image_t, target = self.transform(pil_image, target)
             # Normalized xyxy
-            boxes_t = target["boxes"].as_subclass(torch.Tensor) / self.image_size
+            boxes_tv: tv_tensors.BoundingBoxes = target["boxes"]
+            _, h, w = image_t.shape
+            scale = torch.tensor([w, h, w, h], dtype=torch.float32)
+            boxes_t = box_xyxy_to_cxcywh(boxes_tv.as_subclass(torch.Tensor) / scale)
             # Normalized cxcywh
-            boxes_t = box_xyxy_to_cxcywh(boxes_t).clamp(0, 1)
+            boxes_t = boxes_t.clamp(0, 1)
             labels_t = target["labels"]
         else:
             # Convert to tensor with shape (m, 4), with values clamped between 0 and 1

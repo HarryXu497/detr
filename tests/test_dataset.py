@@ -254,3 +254,26 @@ def test_voc_augment_empty_image_stays_empty(voc_dataset_aug):
     _, target = voc_dataset_aug[1]        # only a difficult object -> filtered out
     assert target["boxes"].shape == (0, 4)
     assert target["labels"].shape == (0,)
+
+
+def test_voc_augment_normalizes_boxes_by_true_image_size(voc_dataset_aug):
+    """The augment path must normalize boxes by the *actual* augmented image size, not a
+    fixed ``image_size``. The person box (xyxy [101,51,301,201] on 640x480) has a
+    resize-invariant normalized cxcywh; scale jitter must not change it, and a horizontal
+    flip only mirrors ``cx``. A divide-by-``image_size`` bug (the rightward-shift bug)
+    makes the values scale-dependent and wrong, which this catches.
+    """
+    # true (unflipped) normalized cxcywh, and the flipped cx = 1 - cx
+    cx0, cy0, w0, h0 = 201 / 640, 126 / 480, 200 / 640, 150 / 480
+
+    for s in range(6):
+        torch.manual_seed(s)
+        _, target = voc_dataset_aug[0]
+        assert target["boxes"].shape == (1, 4)          # no crop -> box always survives
+        cx, cy, w, h = target["boxes"][0].tolist()
+        # cy / w / h are invariant to both scale jitter and horizontal flip
+        assert abs(cy - cy0) < 0.02
+        assert abs(w - w0) < 0.02
+        assert abs(h - h0) < 0.02
+        # cx is either the true center or its mirror (flip), never a scale-dependent value
+        assert abs(cx - cx0) < 0.02 or abs(cx - (1 - cx0)) < 0.02
