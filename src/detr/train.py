@@ -223,7 +223,7 @@ def load_checkpoint(
     if scheduler:
         scheduler.load_state_dict(state_dict["scheduler"])
 
-    return epoch
+    return epoch + 1
 
 
 def main() -> None:
