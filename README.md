@@ -8,8 +8,8 @@ A from-scratch reimplementation of [DETR](https://arxiv.org/abs/2005.12872) (DEt
 - **Hand-written multi-head attention**, stacked into a 6-layer encoder and 6-layer decoder. The decoder outputs all six layers, and the loss is applied at each one (the auxiliary losses).
 - **Hungarian set matching.** Predictions and ground-truth boxes are matched one-to-one by solving a class + L1 + GIoU cost matrix with the Hungarian algorithm. The loss is then cross-entropy on the matched pairs plus L1 and GIoU on the boxes.
 - **Variable-size images with padding masks.** Images keep their aspect ratio; each batch is padded to its largest height and width with a mask marking the padding. The mask feeds the positional encoding and attention, so padded pixels are ignored.
-- **Image augmentation.** Random flip, multi-scale resize, and colour jitter. Boxes are carried as `tv_tensors.BoundingBoxes` so the same transforms apply to them, and any box pushed out of frame is dropped along with its label. On for training, off for eval.
-- **No NMS.** Because the set loss makes each slot predict at most one object, inference drops the no-object class and takes the top class per slot. There is no non-maximum suppression step.
+- **Image augmentation.** Random flip, multi-scale resize, and colour jitter. Boxes are carried as `tv_tensors.BoundingBoxes` so the same transforms apply to them; any box pushed out of frame is dropped along with its label. This is on for training, off for eval.
+- **No NMS.** Because the set loss makes each slot predict at most one object, inference simply takes the top real class per slot (the no-object class is excluded). There is no non-maximum suppression step.
 
 ## Results
 
@@ -25,8 +25,6 @@ Pascal VOC, 20 classes, on a single AWS `g5.xlarge` (A10G, 24 GB):
 |---|---|---|
 | Fixed-size, no augmentation (baseline) | 0.610 | 0.367 |
 | **Aspect-preserving + padding masks + augmentation** | **0.705** | **0.444** |
-
-Augmentation and masking added 0.095 to map@0.5, and localization tightened too (the `map / map_50` ratio rose from 0.60 to 0.63).
 
 ## Training
 
