@@ -1,6 +1,6 @@
 # DETR
 
-A from-scratch reimplementation of [DETR](https://arxiv.org/abs/2005.12872) (DEtection TRansformer) in PyTorch: ResNet-50 backbone, a hand-written transformer, learned object queries, Hungarian matching, and the set-prediction loss, assembled and trained end to end. It reaches **70.5 mAP@0.5** (44.4 COCO-style mAP) on Pascal VOC detection.
+A from-scratch reimplementation of [DETR](https://arxiv.org/abs/2005.12872) (DEtection TRansformer; Object Detection with Transformers) in PyTorch: ResNet-50 backbone, a hand-written transformer, learned object queries, Hungarian matching, and the set-prediction loss, assembled and trained end to end. It reaches **70.5 mAP@0.5** (44.4 COCO-style mAP) on Pascal VOC detection.
 
 ## Highlights
 
